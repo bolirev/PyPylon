@@ -10,13 +10,13 @@ class LZ4DiffLogger(Process):
 
     """
 
-    def __init__(self, m, ready_queue, filename, camname, nimel):
+    def __init__(self, m, ready_queue, nimel):
         super(LZ4DiffLogger, self).__init__()
         self.m = m
         self.ready_queue = ready_queue
         self.nimel = nimel
-        self.camname = camname
-        print(filename)
+        self.__filename = None
+        self.__threshold = None
 
     @property
     def filename(self):
