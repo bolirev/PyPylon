@@ -1,12 +1,15 @@
 from cython.operator cimport dereference as deref, preincrement as inc
 from libcpp cimport bool
 from libcpp.string cimport string
+from libc.string cimport memcpy
 
 cimport numpy as np
 import numpy as np
+import time
 
 from pylon_def cimport *
 
+np.import_array()
 
 cdef class DeviceInfo:
     cdef:
@@ -208,6 +211,60 @@ cdef class Camera:
 
     def __repr__(self):
         return '<Camera {0} open={1}>'.format(self.device_info.friendly_name, self.opened)
+
+    def grab_inrings(self, int nr_images, np.ndarray ringbuf, int ringsize, unsigned int timeout=5000):
+        if not self.opened:
+            raise RuntimeError('Camera not opened')
+
+        self.camera.StartGrabbing(nr_images)
+
+        cdef CGrabResultPtr ptr_grab_result
+        cdef IImage* img
+        cdef char [:] myarray
+
+        width = self.properties['Width']
+        height = self.properties['Height']
+        nimel = width*height
+        cdef str image_format = str(self.properties['PixelFormat'])
+        cdef str bits_per_pixel_prop = str(self.properties['PixelSize'])
+        assert bits_per_pixel_prop.startswith('Bpp'), 'PixelSize property should start with "Bpp"'
+        assert image_format.startswith('Mono'), 'Only mono images allowed at this point'
+        assert not image_format.endswith('p'), 'Packed data not supported at this point'
+
+        rot_i = -1
+        while self.camera.IsGrabbing():
+            rot_i+=1
+            if rot_i>=ringsize:
+                rot_i=0
+
+            with nogil:
+                # Blocking call into native Pylon C++ SDK code, release GIL so other python threads can run
+                self.camera.RetrieveResult(timeout, ptr_grab_result)
+
+            if not ACCESS_CGrabResultPtr_GrabSucceeded(ptr_grab_result):
+                error_desc = (<string>(ACCESS_CGrabResultPtr_GetErrorDescription(ptr_grab_result))).decode()
+                testagainst = 'Payload data'
+                if len(error_desc)>=len(testagainst):
+                    if error_desc[:len(testagainst)]==testagainst:
+                        rot_i -= 1
+                        yield -1
+                        continue
+                raise RuntimeError(error_desc)
+            img = &(<IImage&>ptr_grab_result)
+            if not img.IsValid():
+                raise RuntimeError('Graped IImage is not valid.')
+            if img.GetImageSize() % img.GetHeight():
+                print('This image buffer is weired. Probably you will see an error soonish.')
+                print('\tBytes:', img.GetImageSize())
+                print('\tHeight:', img.GetHeight())
+                print('\tWidth:', img.GetWidth())
+                print('\tGetPaddingX:', img.GetPaddingX())
+            assert not img.GetPaddingX(), 'Image padding not supported.'
+	    
+            items = np.arange(rot_i*nimel,(rot_i+1)*nimel)
+            ringbuf[items]=np.frombuffer((<char*>img.GetBuffer())[:img.GetImageSize()], dtype='uint'+bits_per_pixel_prop[3:])
+            #print(np.sum(ringbuf[items]))
+            yield rot_i
 
     def grab_images(self, int nr_images, unsigned int timeout=5000):
         if not self.opened:
