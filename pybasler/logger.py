@@ -10,11 +10,12 @@ class LZ4DiffLogger(Process):
 
     """
 
-    def __init__(self, m, ready_queue, nimel):
+    def __init__(self, m, ready_queue, nimel, buffer_type):
         super(LZ4DiffLogger, self).__init__()
         self.m = m
         self.ready_queue = ready_queue
         self.nimel = nimel
+        self.buffer_type = buffer_type
         self.__filename = None
         self.__threshold = None
 
@@ -37,7 +38,7 @@ class LZ4DiffLogger(Process):
     @threshold.setter
     def threshold(self, th):
         if not isinstance(th, self.buffer_type):
-            raise TypeError('Threshold is not {}', self.buffer_type)
+            raise TypeError('Threshold is not {}'.format(self.buffer_type))
         self.__threshold = th
 
     def run(self):

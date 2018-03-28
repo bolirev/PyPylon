@@ -9,12 +9,19 @@ import time
 import multiprocessing as mp
 from multiprocessing import Queue, Process
 import os
+import datetime
 import yaml
 import numpy as np
 from setproctitle import setproctitle
 import pypylon
 from pybasler.logger import LZ4DiffLogger
 from pybasler.basler import camera2name, set_cam_properties
+
+nobasler_key = ['name',
+                'folder',
+                'nframe',
+                'buffer_size',
+                'logger_threshold']
 
 
 def parser_recordcam():
@@ -24,12 +31,18 @@ def parser_recordcam():
     arghelp = 'Configuration file'
     parser.add_argument('--config',
                         type=str,
-                        default='',
-                        help=arghelp)
+                        help=arghelp,
+                        required=True)
     arghelp = 'Process title'
     parser.add_argument('--proctitle',
                         type=str,
                         default='basler_pyrecorder',
+                        help=arghelp)
+    
+    arghelp = 'Date format for saving as folder/date/cameraname'
+    parser.add_argument('--dateformat',
+                        type=str,
+                        default='%Y%m%d_%H%M%S',
                         help=arghelp)
     return parser
 
@@ -44,13 +57,7 @@ def configure_camera(config):
             cam.open()
             params = dict()
             for key, item in config.items():
-                if 'name' == key:
-                    continue
-                if 'folder' == key:
-                    continue
-                if 'nframe' == key:
-                    continue
-                if 'buffer_size' == key:
+                if key in nobasler_key:
                     continue
                 params[key] = item
             set_cam_properties(cam, params)
@@ -58,7 +65,7 @@ def configure_camera(config):
     raise NameError('CameraNotFound')
 
 
-def record(config):
+def record(config, date):
     """ record one camera with config as properties
     """
     # Get certain userfull variable
@@ -99,12 +106,17 @@ def record(config):
     ready_queue = Queue(maxsize=n_buffer)
 
     # Create a file name from camera name
-    filename = os.path.join(folder, camera2name(cam) + '.lz4')
-
+    filename = os.path.join(folder, date, camera2name(cam) + '.lz4')
+    dirname = os.path.dirname(filename)
+    if not os.path.exists(dirname):
+        os.makedirs(dirname)
     # Create a logger to store the data
-    logger = LZ4DiffLogger(m, ready_queue, nimel)
+    logger = LZ4DiffLogger(m, ready_queue, 
+                           nimel, buffer_type=np.uint8)
     logger.filename = filename
-    logger.threshold = logth
+    logger.threshold = np.uint8(logth)
+    if logger.threshold != logth:
+        raise ValueError('Treshold changed due to type conversion')
     logger.start()
 
     # Start recording
@@ -131,9 +143,12 @@ if __name__ == '__main__':
     """
        Recording from ncameras
     """
+    today = datetime.datetime.today()
+
     args = parser_recordcam().parse_args()
-    setproctitle(args['proctitle'])
-    configfile = args['config']
+    setproctitle(args.proctitle)
+    configfile = args.config
+    datename = today.strftime(args.dateformat)
 
     with open(configfile) as fp:
         config = yaml.load(fp)
@@ -170,8 +185,9 @@ if __name__ == '__main__':
     processes = list()
     for i in range(n_cameras):
         processes.append(Process(target=record,
-                                 args=(cam_config[i],)))
+                                 args=(cam_config[i],datename)))
     for p in processes:
         p.start()
+
     for p in processes:
         p.join()
