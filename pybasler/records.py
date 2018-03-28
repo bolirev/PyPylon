@@ -51,8 +51,9 @@ def configure_camera(config):
     """ configure and create camera
     """
     # Load configuration
+    camname = config['name']
     for camd in pypylon.factory.find_devices():
-        if camera2name(camd) == config['name']:
+        if camera2name(camd) == camname:
             cam = pypylon.factory.create_device(camd)
             cam.open()
             params = dict()
@@ -62,7 +63,7 @@ def configure_camera(config):
                 params[key] = item
             set_cam_properties(cam, params)
             return cam, config['folder']
-    raise NameError('CameraNotFound')
+    raise NameError('CameraNotFound {}'.format(camname))
 
 
 def record(config, date):
